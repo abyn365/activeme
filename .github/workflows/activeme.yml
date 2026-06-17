@@ -1,10 +1,10 @@
 name: activeme
 
 on:
-#  push:
+ # push:
   workflow_dispatch:
-#  schedule:
- #   - cron: "45 * * * *"
+  schedule:
+    - cron: "45 * * * *"
 
 jobs:
   auto_commit:

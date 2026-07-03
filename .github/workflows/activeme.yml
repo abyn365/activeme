@@ -4,7 +4,8 @@ on:
 #  push:
   workflow_dispatch:
   schedule:
-    - cron: "45 * * * *"
+    # Runs every day at 00:15 UTC to check if it's time to commit
+    - cron: "15 0 * * *"
 
 jobs:
   auto_commit:
@@ -21,11 +22,45 @@ jobs:
           d=$(date '+%Y-%m-%dT%H:%M:%SZ')
           echo $d > COMMIT_UPDATE
 
-      - name: Commit Changes
+      - name: Commit Changes (with 3-5 day sliding scale)
         run: |
           git config --local user.name "abyn365"
           git config --local user.email "abyn@abyn.xyz"
           git add -A
+
+          # --- SLIDING SCALE LOGIC ---
+          # Calculate days passed since the last commit
+          LAST_COMMIT_TIME=$(git log -1 --format=%ct)
+          CURRENT_TIME=$(date +%s)
+          DAYS_PASSED=$(( (CURRENT_TIME - LAST_COMMIT_TIME) / 86400 ))
+
+          echo "Days since last commit: $DAYS_PASSED"
+
+          if [ $DAYS_PASSED -lt 3 ]; then
+            echo "Less than 3 days have passed. Skipping commit."
+            exit 0
+          fi
+
+          if [ $DAYS_PASSED -eq 3 ]; then
+            if [ $((RANDOM % 3)) -ne 0 ]; then
+              echo "Day 3: Random roll decided to wait."
+              exit 0
+            fi
+            echo "Day 3: Random roll passed! Proceeding to commit."
+          fi
+
+          if [ $DAYS_PASSED -eq 4 ]; then
+            if [ $((RANDOM % 2)) -ne 0 ]; then
+              echo "Day 4: Random roll decided to wait."
+              exit 0
+            fi
+            echo "Day 4: Random roll passed! Proceeding to commit."
+          fi
+          
+          if [ $DAYS_PASSED -ge 5 ]; then
+            echo "Day 5 or more reached. Forcing commit execution."
+          fi
+          # ---------------------------
 
           arr[0]="chore(cloud-sync): automated infrastructure heartbeat"
           arr[1]="chore(cloud-sync): scheduled cloud environment sync"

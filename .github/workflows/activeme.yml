@@ -1,111 +1,120 @@
+
 name: activeme
 
 on:
-#  push:
   workflow_dispatch:
   schedule:
-    # Runs every day at 00:15 UTC to check if it's time to commit
+    # Check once per day at 00:15 UTC (07:15 WIB)
     - cron: "15 0 * * *"
+
+permissions:
+  contents: write
 
 jobs:
   auto_commit:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
 
-      - name: Update COMMIT_UPDATE timestamp
+      - name: Random commit scheduler
+        shell: bash
         run: |
-          d=$(date '+%Y-%m-%dT%H:%M:%SZ')
-          echo $d > COMMIT_UPDATE
+          set -euo pipefail
 
-      - name: Commit Changes (with 3-5 day sliding scale)
-        run: |
           git config --local user.name "abyn365"
           git config --local user.email "abyn@abyn.xyz"
-          git add -A
 
-          # --- SLIDING SCALE LOGIC ---
-          # Calculate days passed since the last commit
-          LAST_COMMIT_TIME=$(git log -1 --format=%ct)
-          CURRENT_TIME=$(date +%s)
-          DAYS_PASSED=$(( (CURRENT_TIME - LAST_COMMIT_TIME) / 86400 ))
+          # Persist the next scheduled commit date.
+          SCHEDULE_FILE=".commit_schedule"
 
-          echo "Days since last commit: $DAYS_PASSED"
+          if [[ -f "$SCHEDULE_FILE" ]]; then
+            NEXT_COMMIT_DATE=$(cat "$SCHEDULE_FILE")
+          else
+            # First run: schedule a commit 3–5 days from today.
+            DELAY=$((3 + RANDOM % 3))
+            NEXT_COMMIT_DATE=$(date -u -d "+${DELAY} days" +%Y-%m-%d)
+            echo "$NEXT_COMMIT_DATE" > "$SCHEDULE_FILE"
+          fi
 
-          if [ $DAYS_PASSED -lt 3 ]; then
-            echo "Less than 3 days have passed. Skipping commit."
+          TODAY=$(date -u +%Y-%m-%d)
+
+          echo "Today: $TODAY"
+          echo "Next commit: $NEXT_COMMIT_DATE"
+
+          if [[ "$TODAY" < "$NEXT_COMMIT_DATE" ]]; then
+            echo "Not time yet. Skipping commit."
             exit 0
           fi
 
-          if [ $DAYS_PASSED -eq 3 ]; then
-            if [ $((RANDOM % 3)) -ne 0 ]; then
-              echo "Day 3: Random roll decided to wait."
-              exit 0
-            fi
-            echo "Day 3: Random roll passed! Proceeding to commit."
+          # Update the timestamp.
+          date -u '+%Y-%m-%dT%H:%M:%SZ' > COMMIT_UPDATE
+
+          # Commit messages.
+          messages=(
+            "chore(cloud-sync): automated infrastructure heartbeat"
+            "chore(cloud-sync): scheduled cloud environment sync"
+            "chore(cloud-sync): background infrastructure validation"
+            "chore(cloud-sync): periodic server state reconciliation"
+            "chore(cloud-sync): production uptime assurance cycle"
+            "chore(cloud-sync): distributed system health check"
+            "chore(cloud-sync): runtime environment synchronization"
+            "chore(cloud-sync): container orchestration ping"
+            "chore(cloud-sync): cloud service availability verification"
+            "chore(cloud-sync): automated deployment integrity check"
+            "chore(cloud-sync): infrastructure consistency validation"
+            "chore(cloud-sync): keep-alive signal dispatch"
+            "chore(cloud-sync): scheduled backend sync process"
+            "chore(cloud-sync): monitoring agent heartbeat"
+            "chore(cloud-sync): serverless runtime refresh"
+            "chore(cloud-sync): edge network synchronization task"
+            "chore(cloud-sync): cluster stability verification"
+            "chore(cloud-sync): automated system reconciliation"
+            "chore(cloud-sync): production environment sync cycle"
+            "chore(cloud-sync): cloud resource integrity audit"
+            "chore(cloud-sync): service mesh health validation"
+            "chore(cloud-sync): infrastructure state alignment"
+            "chore(cloud-sync): periodic DevOps maintenance task"
+            "chore(cloud-sync): compute node availability check"
+            "chore(cloud-sync): platform reliability sync"
+            "chore(cloud-sync): background cloud monitoring cycle"
+            "chore(cloud-sync): CI runtime environment ping"
+            "chore(cloud-sync): distributed uptime verification"
+            "chore(cloud-sync): automated cloud status update"
+            "chore(cloud-sync): infrastructure telemetry refresh"
+            "chore(cloud-sync): platform health assurance task"
+            "chore(cloud-sync): backend infrastructure sync"
+            "chore(cloud-sync): scheduled reliability checkpoint"
+            "chore(cloud-sync): system availability audit"
+            "chore(cloud-sync): automated production sync routine"
+            "chore(cloud-sync): runtime consistency validation"
+            "chore(cloud-sync): cluster environment refresh"
+            "chore(cloud-sync): cloud operations maintenance cycle"
+            "chore(cloud-sync): infrastructure state verification"
+            "chore(cloud-sync): automated server reconciliation"
+            "chore(cloud-sync): global uptime sync task"
+          )
+
+          rand=$((RANDOM % ${#messages[@]}))
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
           fi
 
-          if [ $DAYS_PASSED -eq 4 ]; then
-            if [ $((RANDOM % 2)) -ne 0 ]; then
-              echo "Day 4: Random roll decided to wait."
-              exit 0
-            fi
-            echo "Day 4: Random roll passed! Proceeding to commit."
-          fi
-          
-          if [ $DAYS_PASSED -ge 5 ]; then
-            echo "Day 5 or more reached. Forcing commit execution."
-          fi
-          # ---------------------------
+          git commit -m "${messages[$rand]}"
 
-          arr[0]="chore(cloud-sync): automated infrastructure heartbeat"
-          arr[1]="chore(cloud-sync): scheduled cloud environment sync"
-          arr[2]="chore(cloud-sync): background infrastructure validation"
-          arr[3]="chore(cloud-sync): periodic server state reconciliation"
-          arr[4]="chore(cloud-sync): production uptime assurance cycle"
-          arr[5]="chore(cloud-sync): distributed system health check"
-          arr[6]="chore(cloud-sync): runtime environment synchronization"
-          arr[7]="chore(cloud-sync): container orchestration ping"
-          arr[8]="chore(cloud-sync): cloud service availability verification"
-          arr[9]="chore(cloud-sync): automated deployment integrity check"
-          arr[10]="chore(cloud-sync): infrastructure consistency validation"
-          arr[11]="chore(cloud-sync): keep-alive signal dispatch"
-          arr[12]="chore(cloud-sync): scheduled backend sync process"
-          arr[13]="chore(cloud-sync): monitoring agent heartbeat"
-          arr[14]="chore(cloud-sync): serverless runtime refresh"
-          arr[15]="chore(cloud-sync): edge network synchronization task"
-          arr[16]="chore(cloud-sync): cluster stability verification"
-          arr[17]="chore(cloud-sync): automated system reconciliation"
-          arr[18]="chore(cloud-sync): production environment sync cycle"
-          arr[19]="chore(cloud-sync): cloud resource integrity audit"
-          arr[20]="chore(cloud-sync): service mesh health validation"
-          arr[21]="chore(cloud-sync): infrastructure state alignment"
-          arr[22]="chore(cloud-sync): periodic DevOps maintenance task"
-          arr[23]="chore(cloud-sync): compute node availability check"
-          arr[24]="chore(cloud-sync): platform reliability sync"
-          arr[25]="chore(cloud-sync): background cloud monitoring cycle"
-          arr[26]="chore(cloud-sync): CI runtime environment ping"
-          arr[27]="chore(cloud-sync): distributed uptime verification"
-          arr[28]="chore(cloud-sync): automated cloud status update"
-          arr[29]="chore(cloud-sync): infrastructure telemetry refresh"
-          arr[30]="chore(cloud-sync): platform health assurance task"
-          arr[31]="chore(cloud-sync): backend infrastructure sync"
-          arr[32]="chore(cloud-sync): scheduled reliability checkpoint"
-          arr[33]="chore(cloud-sync): system availability audit"
-          arr[34]="chore(cloud-sync): automated production sync routine"
-          arr[35]="chore(cloud-sync): runtime consistency validation"
-          arr[36]="chore(cloud-sync): cluster environment refresh"
-          arr[37]="chore(cloud-sync): cloud operations maintenance cycle"
-          arr[38]="chore(cloud-sync): infrastructure state verification"
-          arr[39]="chore(cloud-sync): automated server reconciliation"
-          arr[40]="chore(cloud-sync): global uptime sync task"
+          # Choose a new random delay between 3 and 5 days.
+          DELAY=$((3 + RANDOM % 3))
+          NEXT_COMMIT_DATE=$(date -u -d "+${DELAY} days" +%Y-%m-%d)
 
-          rand=$((RANDOM % ${#arr[@]}))
-          git commit -m "${arr[$rand]}" || echo "No changes to commit"
+          echo "$NEXT_COMMIT_DATE" > "$SCHEDULE_FILE"
+          git add "$SCHEDULE_FILE"
+          git commit -m "chore(cloud-sync): schedule next heartbeat"
 
       - name: GitHub Push
         uses: ad-m/github-push-action@master

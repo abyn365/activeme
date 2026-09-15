@@ -4,7 +4,7 @@ name: activeme
 on:
   workflow_dispatch:
   schedule:
-    # Check once per day at 00:15 UTC (07:15 WIB)
+    # Runs daily at 00:15 UTC (07:15 WIB).
     - cron: "15 0 * * *"
 
 permissions:
@@ -15,7 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
@@ -28,32 +29,123 @@ jobs:
           git config --local user.name "abyn365"
           git config --local user.email "abyn@abyn.xyz"
 
-          # Persist the next scheduled commit date.
           SCHEDULE_FILE=".commit_schedule"
+          METADATA_FILE="COMMIT_UPDATE"
+          HISTORY_LIMIT=100
 
+          NOW=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          TODAY=$(date -u '+%Y-%m-%d')
+          BRANCH="${GITHUB_REF_NAME}"
+
+          # Read the last commit information.
+          LAST_COMMIT_SHA=$(git log -1 --format=%H)
+          LAST_COMMIT_TIME=$(git log -1 --format=%ct)
+          LAST_COMMIT_DATE=$(date -u -d "@$LAST_COMMIT_TIME" '+%Y-%m-%dT%H:%M:%SZ')
+          CURRENT_TIME=$(date +%s)
+          DAYS_SINCE_LAST=$(( (CURRENT_TIME - LAST_COMMIT_TIME) / 86400 ))
+
+          # Load or create the random schedule.
           if [[ -f "$SCHEDULE_FILE" ]]; then
             NEXT_COMMIT_DATE=$(cat "$SCHEDULE_FILE")
           else
-            # First run: schedule a commit 3–5 days from today.
             DELAY=$((3 + RANDOM % 3))
-            NEXT_COMMIT_DATE=$(date -u -d "+${DELAY} days" +%Y-%m-%d)
+            NEXT_COMMIT_DATE=$(date -u -d "+${DELAY} days" '+%Y-%m-%d')
             echo "$NEXT_COMMIT_DATE" > "$SCHEDULE_FILE"
           fi
 
-          TODAY=$(date -u +%Y-%m-%d)
-
           echo "Today: $TODAY"
+          echo "Last commit: $LAST_COMMIT_DATE"
           echo "Next commit: $NEXT_COMMIT_DATE"
+          echo "Days since last commit: $DAYS_SINCE_LAST"
+
+          # Calculate the number of days until the next commit.
+          TARGET_TIME=$(date -u -d "$NEXT_COMMIT_DATE" +%s)
+          REMAINING_SECONDS=$(( TARGET_TIME - CURRENT_TIME ))
+          DAYS_UNTIL_NEXT=$(( (REMAINING_SECONDS + 86399) / 86400 ))
 
           if [[ "$TODAY" < "$NEXT_COMMIT_DATE" ]]; then
             echo "Not time yet. Skipping commit."
+
+            # Record the skipped run without changing the schedule.
+            python3 - "$METADATA_FILE" "$NOW" "$NEXT_COMMIT_DATE" "$LAST_COMMIT_DATE" "$LAST_COMMIT_SHA" "$DAYS_SINCE_LAST" "$DAYS_UNTIL_NEXT" "$BRANCH" "$HISTORY_LIMIT" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          (
+              file_name,
+              now,
+              next_date,
+              last_date,
+              last_sha,
+              days_since,
+              days_until,
+              branch,
+              history_limit,
+          ) = sys.argv[1:]
+
+          file = Path(file_name)
+
+          if file.exists():
+              try:
+                  data = json.loads(file.read_text())
+              except (json.JSONDecodeError, OSError):
+                  data = {}
+          else:
+              data = {}
+
+          data.setdefault("version", 1)
+          data.setdefault("repository", "abyn365")
+          data.setdefault("history", [])
+
+          data.update({
+              "last_commit": last_date,
+              "last_commit_sha": last_sha,
+              "next_commit": next_date,
+              "days_since_last_commit": int(days_since),
+              "days_until_next_commit": int(days_until),
+              "status": "waiting",
+              "last_checked": now,
+              "branch": branch
+          })
+
+          data["history"].append({
+              "date": now,
+              "event": "skipped",
+              "reason": "scheduled_date_not_reached",
+              "next_commit": next_date
+          })
+
+          data["history"] = data["history"][-int(history_limit):]
+          file.write_text(json.dumps(data, indent=2) + "\n")
+          PY
+
+            git add "$METADATA_FILE"
+
+            # Commit metadata only when it actually changed.
+            if git diff --cached --quiet; then
+              echo "No metadata changes."
+              exit 0
+            fi
+
+            git commit -m "chore(cloud-sync): update activity metadata"
             exit 0
           fi
 
-          # Update the timestamp.
-          date -u '+%Y-%m-%dT%H:%M:%SZ' > COMMIT_UPDATE
+          # The scheduled date has arrived.
+          echo "Commit date reached. Creating heartbeat."
 
-          # Commit messages.
+          # Update the heartbeat timestamp.
+          NOW=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          # Select the next random delay.
+          DELAY=$((3 + RANDOM % 3))
+          NEXT_DATE=$(date -u -d "+${DELAY} days" '+%Y-%m-%d')
+
+          # Record the new schedule.
+          echo "$NEXT_DATE" > "$SCHEDULE_FILE"
+
+          # Select a random commit message.
           messages=(
             "chore(cloud-sync): automated infrastructure heartbeat"
             "chore(cloud-sync): scheduled cloud environment sync"
@@ -99,6 +191,61 @@ jobs:
           )
 
           rand=$((RANDOM % ${#messages[@]}))
+          COMMIT_MESSAGE="${messages[$rand]}"
+
+          # Update JSON metadata and retain history.
+          python3 - "$METADATA_FILE" "$NOW" "$NEXT_DATE" "$DELAY" "$DAYS_SINCE_LAST" "$BRANCH" "$HISTORY_LIMIT" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          (
+              file_name,
+              now,
+              next_date,
+              delay,
+              days_since,
+              branch,
+              history_limit,
+          ) = sys.argv[1:]
+
+          file = Path(file_name)
+
+          if file.exists():
+              try:
+                  data = json.loads(file.read_text())
+              except (json.JSONDecodeError, OSError):
+                  data = {}
+          else:
+              data = {}
+
+          data.setdefault("version", 1)
+          data.setdefault("repository", "abyn365")
+          data.setdefault("history", [])
+
+          data.update({
+              "last_commit": now,
+              "next_commit": next_date,
+              "scheduled_delay_days": int(delay),
+              "days_since_last_commit": int(days_since),
+              "days_until_next_commit": int(delay),
+              "status": "committed",
+              "last_checked": now,
+              "branch": branch
+          })
+
+          data["history"].append({
+              "date": now,
+              "event": "commit_scheduled",
+              "delay_days": int(delay),
+              "next_commit": next_date
+          })
+
+          data["history"] = data["history"][-int(history_limit):]
+          file.write_text(json.dumps(data, indent=2) + "\n")
+          PY
+
+          # Commit all changes.
           git add -A
 
           if git diff --cached --quiet; then
@@ -106,19 +253,11 @@ jobs:
             exit 0
           fi
 
-          git commit -m "${messages[$rand]}"
-
-          # Choose a new random delay between 3 and 5 days.
-          DELAY=$((3 + RANDOM % 3))
-          NEXT_COMMIT_DATE=$(date -u -d "+${DELAY} days" +%Y-%m-%d)
-
-          echo "$NEXT_COMMIT_DATE" > "$SCHEDULE_FILE"
-          git add "$SCHEDULE_FILE"
-          git commit -m "chore(cloud-sync): schedule next heartbeat"
+          git commit -m "$COMMIT_MESSAGE"
 
       - name: GitHub Push
         uses: ad-m/github-push-action@master
         with:
-          force: true
+          force: false
           directory: "."
           github_token: ${{ secrets.PAT_TOKEN }}

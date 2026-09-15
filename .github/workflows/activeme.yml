@@ -1,10 +1,9 @@
-
 name: activeme
 
 on:
   workflow_dispatch:
   schedule:
-    # Runs daily at 00:15 UTC (07:15 WIB).
+    # Daily at 00:15 UTC (07:15 WIB).
     - cron: "15 0 * * *"
 
 permissions:
@@ -21,241 +20,131 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
 
+      - name: Restore schedule cache
+        uses: actions/cache/restore@v4
+        id: schedule-cache
+        with:
+          path: .commit_schedule
+          key: commit-schedule-${{ github.run_id }}
+          restore-keys: |
+            commit-schedule-
+
       - name: Random commit scheduler
         shell: bash
         run: |
           set -euo pipefail
 
-          git config --local user.name "abyn365"
-          git config --local user.email "abyn@abyn.xyz"
-
+          MIN_DELAY_DAYS=3
+          MAX_DELAY_DAYS=5
+          HISTORY_LIMIT=100
           SCHEDULE_FILE=".commit_schedule"
           METADATA_FILE="COMMIT_UPDATE"
-          HISTORY_LIMIT=100
 
-          NOW=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          TODAY=$(date -u '+%Y-%m-%d')
+          GIT_USER_NAME="abyn365"
+          GIT_USER_EMAIL="abyn@abyn.xyz"
+
+          if (( MIN_DELAY_DAYS < 1 )); then
+            echo "MIN_DELAY_DAYS must be at least 1."
+            exit 1
+          fi
+
+          if (( MAX_DELAY_DAYS < MIN_DELAY_DAYS )); then
+            echo "MAX_DELAY_DAYS must be >= MIN_DELAY_DAYS."
+            exit 1
+          fi
+
+          git config --local user.name "$GIT_USER_NAME"
+          git config --local user.email "$GIT_USER_EMAIL"
+
+          REPOSITORY="${GITHUB_REPOSITORY#*/}"
+          OWNER="${GITHUB_REPOSITORY%%/*}"
           BRANCH="${GITHUB_REF_NAME}"
 
-          # Read the last commit information.
+          NOW=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          CURRENT_TIME=$(date +%s)
+
           LAST_COMMIT_SHA=$(git log -1 --format=%H)
           LAST_COMMIT_TIME=$(git log -1 --format=%ct)
           LAST_COMMIT_DATE=$(date -u -d "@$LAST_COMMIT_TIME" '+%Y-%m-%dT%H:%M:%SZ')
-          CURRENT_TIME=$(date +%s)
           DAYS_SINCE_LAST=$(( (CURRENT_TIME - LAST_COMMIT_TIME) / 86400 ))
 
-          # Load or create the random schedule.
           if [[ -f "$SCHEDULE_FILE" ]]; then
-            NEXT_COMMIT_DATE=$(cat "$SCHEDULE_FILE")
+            NEXT_COMMIT_AT=$(cat "$SCHEDULE_FILE")
           else
-            DELAY=$((3 + RANDOM % 3))
-            NEXT_COMMIT_DATE=$(date -u -d "+${DELAY} days" '+%Y-%m-%d')
-            echo "$NEXT_COMMIT_DATE" > "$SCHEDULE_FILE"
+            DELAY=$((MIN_DELAY_DAYS + RANDOM % (MAX_DELAY_DAYS - MIN_DELAY_DAYS + 1)))
+            NEXT_COMMIT_AT=$(date -u -d "+${DELAY} days" '+%Y-%m-%dT%H:%M:%SZ')
+            echo "$NEXT_COMMIT_AT" > "$SCHEDULE_FILE"
           fi
 
-          echo "Today: $TODAY"
-          echo "Last commit: $LAST_COMMIT_DATE"
-          echo "Next commit: $NEXT_COMMIT_DATE"
-          echo "Days since last commit: $DAYS_SINCE_LAST"
-
-          # Calculate the number of days until the next commit.
-          TARGET_TIME=$(date -u -d "$NEXT_COMMIT_DATE" +%s)
+          TARGET_TIME=$(date -u -d "$NEXT_COMMIT_AT" +%s)
           REMAINING_SECONDS=$(( TARGET_TIME - CURRENT_TIME ))
-          DAYS_UNTIL_NEXT=$(( (REMAINING_SECONDS + 86399) / 86400 ))
 
-          if [[ "$TODAY" < "$NEXT_COMMIT_DATE" ]]; then
-            echo "Not time yet. Skipping commit."
+          if (( REMAINING_SECONDS > 0 )); then
+            DAYS_UNTIL_NEXT=$(( (REMAINING_SECONDS + 86399) / 86400 ))
+          else
+            DAYS_UNTIL_NEXT=0
+          fi
 
-            # Record the skipped run without changing the schedule.
-            python3 - "$METADATA_FILE" "$NOW" "$NEXT_COMMIT_DATE" "$LAST_COMMIT_DATE" "$LAST_COMMIT_SHA" "$DAYS_SINCE_LAST" "$DAYS_UNTIL_NEXT" "$BRANCH" "$HISTORY_LIMIT" <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          (
-              file_name,
-              now,
-              next_date,
-              last_date,
-              last_sha,
-              days_since,
-              days_until,
-              branch,
-              history_limit,
-          ) = sys.argv[1:]
-
-          file = Path(file_name)
-
-          if file.exists():
-              try:
-                  data = json.loads(file.read_text())
-              except (json.JSONDecodeError, OSError):
-                  data = {}
-          else:
-              data = {}
-
-          data.setdefault("version", 1)
-          data.setdefault("repository", "abyn365")
-          data.setdefault("history", [])
-
-          data.update({
-              "last_commit": last_date,
-              "last_commit_sha": last_sha,
-              "next_commit": next_date,
-              "days_since_last_commit": int(days_since),
-              "days_until_next_commit": int(days_until),
-              "status": "waiting",
-              "last_checked": now,
-              "branch": branch
-          })
-
-          data["history"].append({
-              "date": now,
-              "event": "skipped",
-              "reason": "scheduled_date_not_reached",
-              "next_commit": next_date
-          })
-
-          data["history"] = data["history"][-int(history_limit):]
-          file.write_text(json.dumps(data, indent=2) + "\n")
-          PY
-
-            git add "$METADATA_FILE"
-
-            # Commit metadata only when it actually changed.
-            if git diff --cached --quiet; then
-              echo "No metadata changes."
-              exit 0
-            fi
-
-            git commit -m "chore(cloud-sync): update activity metadata"
+          if (( CURRENT_TIME < TARGET_TIME )); then
+            echo "IS_DUE=false" >> $GITHUB_ENV
+            echo "### ⏳ Daily Check Summary" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** Waiting for target date" >> $GITHUB_STEP_SUMMARY
+            echo "- **Last Commit:** $LAST_COMMIT_DATE ($DAYS_SINCE_LAST days ago)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Target Date:** $NEXT_COMMIT_AT ($DAYS_UNTIL_NEXT days remaining)" >> $GITHUB_STEP_SUMMARY
             exit 0
           fi
 
-          # The scheduled date has arrived.
-          echo "Commit date reached. Creating heartbeat."
+          echo "IS_DUE=true" >> $GITHUB_ENV
+          DELAY=$((MIN_DELAY_DAYS + RANDOM % (MAX_DELAY_DAYS - MIN_DELAY_DAYS + 1)))
+          NEXT_COMMIT_AT=$(date -u -d "+${DELAY} days" '+%Y-%m-%dT%H:%M:%SZ')
+          echo "$NEXT_COMMIT_AT" > "$SCHEDULE_FILE"
 
-          # Update the heartbeat timestamp.
-          NOW=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-
-          # Select the next random delay.
-          DELAY=$((3 + RANDOM % 3))
-          NEXT_DATE=$(date -u -d "+${DELAY} days" '+%Y-%m-%d')
-
-          # Record the new schedule.
-          echo "$NEXT_DATE" > "$SCHEDULE_FILE"
-
-          # Select a random commit message.
           messages=(
             "chore(cloud-sync): automated infrastructure heartbeat"
             "chore(cloud-sync): scheduled cloud environment sync"
             "chore(cloud-sync): background infrastructure validation"
             "chore(cloud-sync): periodic server state reconciliation"
             "chore(cloud-sync): production uptime assurance cycle"
-            "chore(cloud-sync): distributed system health check"
-            "chore(cloud-sync): runtime environment synchronization"
-            "chore(cloud-sync): container orchestration ping"
-            "chore(cloud-sync): cloud service availability verification"
-            "chore(cloud-sync): automated deployment integrity check"
-            "chore(cloud-sync): infrastructure consistency validation"
-            "chore(cloud-sync): keep-alive signal dispatch"
-            "chore(cloud-sync): scheduled backend sync process"
-            "chore(cloud-sync): monitoring agent heartbeat"
-            "chore(cloud-sync): serverless runtime refresh"
-            "chore(cloud-sync): edge network synchronization task"
-            "chore(cloud-sync): cluster stability verification"
-            "chore(cloud-sync): automated system reconciliation"
-            "chore(cloud-sync): production environment sync cycle"
-            "chore(cloud-sync): cloud resource integrity audit"
-            "chore(cloud-sync): service mesh health validation"
-            "chore(cloud-sync): infrastructure state alignment"
-            "chore(cloud-sync): periodic DevOps maintenance task"
-            "chore(cloud-sync): compute node availability check"
-            "chore(cloud-sync): platform reliability sync"
-            "chore(cloud-sync): background cloud monitoring cycle"
-            "chore(cloud-sync): CI runtime environment ping"
-            "chore(cloud-sync): distributed uptime verification"
-            "chore(cloud-sync): automated cloud status update"
-            "chore(cloud-sync): infrastructure telemetry refresh"
-            "chore(cloud-sync): platform health assurance task"
-            "chore(cloud-sync): backend infrastructure sync"
-            "chore(cloud-sync): scheduled reliability checkpoint"
-            "chore(cloud-sync): system availability audit"
-            "chore(cloud-sync): automated production sync routine"
-            "chore(cloud-sync): runtime consistency validation"
-            "chore(cloud-sync): cluster environment refresh"
-            "chore(cloud-sync): cloud operations maintenance cycle"
-            "chore(cloud-sync): infrastructure state verification"
-            "chore(cloud-sync): automated server reconciliation"
-            "chore(cloud-sync): global uptime sync task"
           )
-
           rand=$((RANDOM % ${#messages[@]}))
           COMMIT_MESSAGE="${messages[$rand]}"
 
-          # Update JSON metadata and retain history.
-          python3 - "$METADATA_FILE" "$NOW" "$NEXT_DATE" "$DELAY" "$DAYS_SINCE_LAST" "$BRANCH" "$HISTORY_LIMIT" <<'PY'
-          import json
-          import sys
-          from pathlib import Path
+          python3 scripts/update_metadata.py "$METADATA_FILE" "$NOW" "$OWNER" "$REPOSITORY" "$BRANCH" \
+            "$LAST_COMMIT_DATE" "$LAST_COMMIT_SHA" "$NEXT_COMMIT_AT" \
+            "$DAYS_SINCE_LAST" "$DELAY" "committed" "commit_scheduled" \
+            "scheduled_trigger" "$DELAY" "" "$COMMIT_MESSAGE" "$HISTORY_LIMIT"
 
-          (
-              file_name,
-              now,
-              next_date,
-              delay,
-              days_since,
-              branch,
-              history_limit,
-          ) = sys.argv[1:]
-
-          file = Path(file_name)
-
-          if file.exists():
-              try:
-                  data = json.loads(file.read_text())
-              except (json.JSONDecodeError, OSError):
-                  data = {}
-          else:
-              data = {}
-
-          data.setdefault("version", 1)
-          data.setdefault("repository", "abyn365")
-          data.setdefault("history", [])
-
-          data.update({
-              "last_commit": now,
-              "next_commit": next_date,
-              "scheduled_delay_days": int(delay),
-              "days_since_last_commit": int(days_since),
-              "days_until_next_commit": int(delay),
-              "status": "committed",
-              "last_checked": now,
-              "branch": branch
-          })
-
-          data["history"].append({
-              "date": now,
-              "event": "commit_scheduled",
-              "delay_days": int(delay),
-              "next_commit": next_date
-          })
-
-          data["history"] = data["history"][-int(history_limit):]
-          file.write_text(json.dumps(data, indent=2) + "\n")
-          PY
-
-          # Commit all changes.
           git add -A
-
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
 
           git commit -m "$COMMIT_MESSAGE"
+          COMMIT_SHA=$(git rev-parse HEAD)
 
-      - name: GitHub Push
+          python3 scripts/update_metadata.py "$METADATA_FILE" "$NOW" "$OWNER" "$REPOSITORY" "$BRANCH" \
+            "$NOW" "$COMMIT_SHA" "$NEXT_COMMIT_AT" \
+            "0" "$DELAY" "committed" "commit_completed" \
+            "heartbeat" "$DELAY" "$COMMIT_SHA" "$COMMIT_MESSAGE" "$HISTORY_LIMIT"
+
+          git add "$METADATA_FILE"
+          git commit --amend --no-edit
+
+          echo "### ✅ Heartbeat Commit Generated" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit SHA:** \`$COMMIT_SHA\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Message:** $COMMIT_MESSAGE" >> $GITHUB_STEP_SUMMARY
+          echo "- **Next Scheduled Commit:** $NEXT_COMMIT_AT" >> $GITHUB_STEP_SUMMARY
+
+      - name: Save schedule cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .commit_schedule
+          key: commit-schedule-${{ github.run_id }}
+
+      - name: Push to GitHub
+        if: env.IS_DUE == 'true'
         uses: ad-m/github-push-action@master
         with:
           force: false

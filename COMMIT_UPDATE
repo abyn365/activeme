@@ -1,20 +1,44 @@
 {
   "version": 1,
-  "repository": "abyn365",
+  "repository": "activeme",
   "history": [
     {
       "date": "2026-09-15T15:39:16Z",
       "event": "skipped",
       "reason": "scheduled_date_not_reached",
       "next_commit": "2026-09-20"
+    },
+    {
+      "date": "2026-09-21T04:54:12Z",
+      "event": "commit_scheduled",
+      "reason": "scheduled_trigger",
+      "next_commit_at": "2026-09-26T04:54:12Z",
+      "commit_message": "chore(cloud-sync): periodic server state reconciliation",
+      "delay_days": 5
+    },
+    {
+      "date": "2026-09-21T04:54:12Z",
+      "event": "commit_completed",
+      "reason": "heartbeat",
+      "next_commit_at": "2026-09-26T04:54:12Z",
+      "commit_sha": "16752eb64f6e67ca473364be7b31d35c563affd7",
+      "commit_message": "chore(cloud-sync): periodic server state reconciliation",
+      "delay_days": 5
     }
   ],
-  "last_commit": "2026-09-15T15:38:49Z",
-  "last_commit_sha": "fc74579e786f1cbe1517986bff0ba9b41b1f3a25",
+  "last_commit": "2026-09-21T04:54:12Z",
+  "last_commit_sha": "16752eb64f6e67ca473364be7b31d35c563affd7",
   "next_commit": "2026-09-20",
   "days_since_last_commit": 0,
   "days_until_next_commit": 5,
-  "status": "waiting",
-  "last_checked": "2026-09-15T15:39:16Z",
-  "branch": "main"
+  "status": "committed",
+  "last_checked": "2026-09-21T04:54:12Z",
+  "branch": "main",
+  "owner": "abyn365",
+  "next_commit_at": "2026-09-26T04:54:12Z",
+  "scheduler": {
+    "min_delay_days": 5,
+    "max_delay_days": 5,
+    "selected_delay_days": 5
+  }
 }

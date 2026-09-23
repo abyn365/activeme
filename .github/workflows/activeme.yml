@@ -30,6 +30,8 @@ jobs:
             commit-schedule-
 
       - name: Random commit scheduler
+        env:
+          DEADMAN_MAX_AGE_DAYS: ${{ vars.DEADMAN_MAX_AGE_DAYS || '7' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -39,6 +41,8 @@ jobs:
           HISTORY_LIMIT=100
           SCHEDULE_FILE=".commit_schedule"
           METADATA_FILE="COMMIT_UPDATE"
+          DEADMAN_FILE=".deadman/last_ping.json"
+          DEADMAN_MAX_AGE_DAYS="${DEADMAN_MAX_AGE_DAYS:-7}"
 
           GIT_USER_NAME="abyn365"
           GIT_USER_EMAIL="abyn@abyn.xyz"
@@ -50,6 +54,11 @@ jobs:
 
           if (( MAX_DELAY_DAYS < MIN_DELAY_DAYS )); then
             echo "MAX_DELAY_DAYS must be >= MIN_DELAY_DAYS."
+            exit 1
+          fi
+
+          if (( DEADMAN_MAX_AGE_DAYS < 1 )); then
+            echo "DEADMAN_MAX_AGE_DAYS must be at least 1."
             exit 1
           fi
 
@@ -67,6 +76,40 @@ jobs:
           LAST_COMMIT_TIME=$(git log -1 --format=%ct)
           LAST_COMMIT_DATE=$(date -u -d "@$LAST_COMMIT_TIME" '+%Y-%m-%dT%H:%M:%SZ')
           DAYS_SINCE_LAST=$(( (CURRENT_TIME - LAST_COMMIT_TIME) / 86400 ))
+
+          if [[ ! -f "$DEADMAN_FILE" ]]; then
+            echo "IS_DUE=false" >> "$GITHUB_ENV"
+            echo "### 🛑 Dead-man switch" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Status:** No Discord heartbeat has been received." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          LAST_PING_AT=$(python3 - "$DEADMAN_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as state_file:
+    value = json.load(state_file).get("last_ping_at", "")
+
+if not isinstance(value, str) or not value:
+    raise SystemExit("Dead-man heartbeat has no valid timestamp.")
+print(value)
+PY
+          )
+          LAST_PING_TIME=$(date -u -d "$LAST_PING_AT" +%s)
+          PING_AGE_SECONDS=$(( CURRENT_TIME - LAST_PING_TIME ))
+          MAX_PING_AGE_SECONDS=$(( DEADMAN_MAX_AGE_DAYS * 86400 ))
+
+          if (( PING_AGE_SECONDS < 0 || PING_AGE_SECONDS > MAX_PING_AGE_SECONDS )); then
+            echo "IS_DUE=false" >> "$GITHUB_ENV"
+            echo "### 🛑 Dead-man switch" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Status:** Discord heartbeat is missing or stale." >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Last heartbeat:** $LAST_PING_AT" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Maximum age:** $DEADMAN_MAX_AGE_DAYS days" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Dead-man heartbeat accepted: $LAST_PING_AT"
 
           if [[ -f "$SCHEDULE_FILE" ]]; then
             NEXT_COMMIT_AT=$(cat "$SCHEDULE_FILE")

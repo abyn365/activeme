@@ -75,21 +75,38 @@
       "commit_sha": "70ac67c43824972d4f60ee9328bf4757899639e5",
       "commit_message": "chore(cloud-sync): scheduled cloud environment sync",
       "delay_days": 3
+    },
+    {
+      "date": "2026-10-10T05:51:26Z",
+      "event": "commit_scheduled",
+      "reason": "scheduled_trigger",
+      "next_commit_at": "2026-10-15T05:51:26Z",
+      "commit_message": "chore(cloud-sync): scheduled cloud environment sync",
+      "delay_days": 5
+    },
+    {
+      "date": "2026-10-10T05:51:26Z",
+      "event": "commit_completed",
+      "reason": "heartbeat",
+      "next_commit_at": "2026-10-15T05:51:26Z",
+      "commit_sha": "a6d994ea927042130c4cdcc375c00e5ea495589f",
+      "commit_message": "chore(cloud-sync): scheduled cloud environment sync",
+      "delay_days": 5
     }
   ],
-  "last_commit": "2026-10-06T06:18:56Z",
-  "last_commit_sha": "70ac67c43824972d4f60ee9328bf4757899639e5",
+  "last_commit": "2026-10-10T05:51:26Z",
+  "last_commit_sha": "a6d994ea927042130c4cdcc375c00e5ea495589f",
   "next_commit": "2026-09-20",
   "days_since_last_commit": 0,
-  "days_until_next_commit": 3,
+  "days_until_next_commit": 5,
   "status": "committed",
-  "last_checked": "2026-10-06T06:18:56Z",
+  "last_checked": "2026-10-10T05:51:26Z",
   "branch": "main",
   "owner": "abyn365",
-  "next_commit_at": "2026-10-09T06:18:56Z",
+  "next_commit_at": "2026-10-15T05:51:26Z",
   "scheduler": {
     "min_delay_days": 5,
     "max_delay_days": 5,
-    "selected_delay_days": 3
+    "selected_delay_days": 5
   }
 }
